@@ -1,0 +1,30 @@
+{
+	"$schema": "https://raw.githubusercontent.com/Bedrock-OSS/regolith-schemas/main/config/v1.2.json",
+	"name": "pre_post_shell_test",
+	"author": "Bedrock-OSS",
+	"packs": {
+		"behaviorPack": "./packs/BP",
+		"resourcePack": "./packs/RP"
+	},
+	"regolith": {
+		"profiles": {
+			"default": {
+				"preShell": [
+					"echo 'PreShell executed' > pre_output.txt",
+					"echo 'Second preShell command' >> pre_output.txt"
+				],
+				"filters": [],
+				"export": {
+					"target": "local",
+					"rpPath": "./build/RP",
+					"bpPath": "./build/BP"
+				},
+				"postShell": [
+					"echo 'PostShell executed' > post_output.txt",
+					"echo 'Second postShell command' >> post_output.txt"
+				]
+			}
+		},
+		"dataPath": "./packs/data"
+	}
+}
