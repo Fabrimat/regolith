@@ -3,14 +3,38 @@ package regolith
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/Bedrock-OSS/go-burrito/burrito"
-
 	"github.com/otiai10/copy"
 )
+
+// runDirectShellCommand executes a shell command directly in the parent shell (no venv/subshell)
+// and allows environment variable injection.
+func runDirectShellCommand(command string) error {
+	Logger.Debugf("Executing shell command: %s", command)
+	// On Windows, use powershell.exe -Command; on Unix, use /bin/sh -c
+	var shell, flag string
+	if runtime.GOOS == "windows" {
+		shell = "powershell.exe"
+		flag = "-Command"
+	} else {
+		shell = "sh"
+		flag = "-c"
+	}
+	cmd := exec.Command(shell, flag, command)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+	// Inherit environment from parent
+	cmd.Env = os.Environ()
+	// Run synchronously
+	return cmd.Run()
+}
 
 // SetupTmpFiles set up the workspace for the filters.
 func SetupTmpFiles(context RunContext) error {
@@ -226,42 +250,69 @@ func CheckProfileImpl(
 // times in case of interruptions (changes in the source files).
 func RunProfile(context RunContext) error {
 start:
-	// Prepare tmp files
-	err := SetupTmpFiles(context)
-	if err != nil {
-		return burrito.WrapErrorf(err, setupTmpFilesError, context.DotRegolithPath)
-	}
-	if context.IsInterrupted() {
-		goto start
-	}
-	// Run the profile
-	interrupted, err := RunProfileImpl(context)
-	if err != nil {
-		return burrito.PassError(err)
-	}
-	if interrupted {
-		goto start
-	}
-	// Export files
-	Logger.Info("Moving files to target directory.")
-	start := time.Now()
-	if context.IsInWatchMode() {
-		context.fileWatchingStage <- "pause"
-	}
-	err = ExportProject(context)
-	if context.IsInWatchMode() {
-		// We need to restart the watcher before error handling. See:
-		// https://github.com/Bedrock-OSS/regolith/pull/297#issuecomment-2411981894
-		context.fileWatchingStage <- "restart"
-	}
-	if err != nil {
-		return burrito.WrapError(err, exportProjectError)
-	}
-	if context.IsInterrupted("data") {
-		goto start
-	}
-	Logger.Debug("Done in ", time.Since(start))
-	return nil
+		// Execute preShell commands if present
+		profile, err := context.GetProfile()
+		if err != nil {
+			return burrito.WrapErrorf(err, runContextGetProfileError)
+		}
+		if len(profile.PreShell) > 0 {
+			Logger.Info("Running preShell commands...")
+			for _, cmd := range profile.PreShell {
+				err := runDirectShellCommand(cmd)
+				if err != nil {
+					return burrito.WrapErrorf(err, "PreShell command failed: %s", cmd)
+				}
+			}
+		}
+
+		// Prepare tmp files
+		err = SetupTmpFiles(context)
+		if err != nil {
+			return burrito.WrapErrorf(err, setupTmpFilesError, context.DotRegolithPath)
+		}
+		if context.IsInterrupted() {
+			goto start
+		}
+		// Run the profile
+		interrupted, err := RunProfileImpl(context)
+		if err != nil {
+			return burrito.PassError(err)
+		}
+		if interrupted {
+			goto start
+		}
+		// Export files
+		Logger.Info("Moving files to target directory.")
+		start := time.Now()
+		if context.IsInWatchMode() {
+			context.fileWatchingStage <- "pause"
+		}
+		err = ExportProject(context)
+		if context.IsInWatchMode() {
+			// We need to restart the watcher before error handling. See:
+			// https://github.com/Bedrock-OSS/regolith/pull/297#issuecomment-2411981894
+			context.fileWatchingStage <- "restart"
+		}
+		if err != nil {
+			return burrito.WrapError(err, exportProjectError)
+		}
+		if context.IsInterrupted("data") {
+			goto start
+		}
+		Logger.Debug("Done in ", time.Since(start))
+
+		// Execute postShell commands if present
+		if len(profile.PostShell) > 0 {
+			Logger.Info("Running postShell commands...")
+			for _, cmd := range profile.PostShell {
+				err := runDirectShellCommand(cmd)
+				if err != nil {
+					return burrito.WrapErrorf(err, "PostShell command failed: %s", cmd)
+				}
+			}
+		}
+
+		return nil
 }
 
 // RunProfileImpl runs the profile from the given context and returns true
@@ -370,6 +421,8 @@ type FilterCollection struct {
 type Profile struct {
 	FilterCollection
 	ExportTarget ExportTarget `json:"export,omitzero"`
+	PreShell     []string     `json:"preShell,omitempty"`
+	PostShell    []string     `json:"postShell,omitempty"`
 }
 
 func ProfileFromObject(
@@ -411,6 +464,26 @@ func ProfileFromObject(
 		return result, burrito.WrapErrorf(err, jsonPathParseError, "export")
 	}
 	result.ExportTarget = exportTarget
+	// PreShell (optional)
+	if preShellObj, ok := obj["preShell"]; ok {
+		if preShell, ok := preShellObj.([]any); ok {
+			for _, cmd := range preShell {
+				if cmdStr, ok := cmd.(string); ok {
+					result.PreShell = append(result.PreShell, cmdStr)
+				}
+			}
+		}
+	}
+	// PostShell (optional)
+	if postShellObj, ok := obj["postShell"]; ok {
+		if postShell, ok := postShellObj.([]any); ok {
+			for _, cmd := range postShell {
+				if cmdStr, ok := cmd.(string); ok {
+					result.PostShell = append(result.PostShell, cmdStr)
+				}
+			}
+		}
+	}
 	return result, nil
 }
 
