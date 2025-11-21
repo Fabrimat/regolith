@@ -332,9 +332,10 @@ start:
 	if err != nil {
 		return burrito.WrapErrorf(err, runContextGetProfileError)
 	}
-	if len(profile.PreShell) > 0 {
+	preShellCmds := profile.PreShell.GetCommandsForCurrentOS()
+	if len(preShellCmds) > 0 {
 		Logger.Info("Running preShell commands...")
-		err := runShellCommands(profile.PreShell)
+		err := runShellCommands(preShellCmds)
 		if err != nil {
 			return burrito.WrapErrorf(err, "PreShell commands failed")
 		}
@@ -377,9 +378,10 @@ start:
 	Logger.Debug("Done in ", time.Since(start))
 
 	// Execute postShell commands if present
-	if len(profile.PostShell) > 0 {
+	postShellCmds := profile.PostShell.GetCommandsForCurrentOS()
+	if len(postShellCmds) > 0 {
 		Logger.Info("Running postShell commands...")
-		err := runShellCommands(profile.PostShell)
+		err := runShellCommands(postShellCmds)
 		if err != nil {
 			return burrito.WrapErrorf(err, "PostShell commands failed")
 		}
@@ -495,13 +497,41 @@ type FilterCollection struct {
 	Filters []FilterRunner `json:"filters"`
 }
 
+// ShellCommands represents shell commands that can be either:
+// - A simple array of strings (executed on all OS)
+// - An object with OS-specific arrays (windows, linux, darwin)
+type ShellCommands struct {
+	All     []string
+	Windows []string
+	Linux   []string
+	Darwin  []string
+}
+
+// GetCommandsForCurrentOS returns the commands to execute for the current OS
+func (sc *ShellCommands) GetCommandsForCurrentOS() []string {
+	if len(sc.All) > 0 {
+		return sc.All
+	}
+	
+	switch runtime.GOOS {
+	case "windows":
+		return sc.Windows
+	case "linux":
+		return sc.Linux
+	case "darwin":
+		return sc.Darwin
+	default:
+		return nil
+	}
+}
+
 // Profile is a collection of filters and an export target
 // When editing, adjust ProfileFromObject function as well
 type Profile struct {
 	FilterCollection
 	ExportTarget ExportTarget `json:"export,omitzero"`
-	PreShell     []string     `json:"preShell,omitempty"`
-	PostShell    []string     `json:"postShell,omitempty"`
+	PreShell     ShellCommands
+	PostShell    ShellCommands
 }
 
 func ProfileFromObject(
@@ -543,22 +573,70 @@ func ProfileFromObject(
 		return result, burrito.WrapErrorf(err, jsonPathParseError, "export")
 	}
 	result.ExportTarget = exportTarget
-	// PreShell (optional)
+	// PreShell (optional) - can be array or object with OS-specific arrays
 	if preShellObj, ok := obj["preShell"]; ok {
-		if preShell, ok := preShellObj.([]any); ok {
-			for _, cmd := range preShell {
+		if preShellArray, ok := preShellObj.([]any); ok {
+			// Simple array format - applies to all OS
+			for _, cmd := range preShellArray {
 				if cmdStr, ok := cmd.(string); ok {
-					result.PreShell = append(result.PreShell, cmdStr)
+					result.PreShell.All = append(result.PreShell.All, cmdStr)
+				}
+			}
+		} else if preShellMap, ok := preShellObj.(map[string]any); ok {
+			// OS-specific format
+			if windowsCmds, ok := preShellMap["windows"].([]any); ok {
+				for _, cmd := range windowsCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PreShell.Windows = append(result.PreShell.Windows, cmdStr)
+					}
+				}
+			}
+			if linuxCmds, ok := preShellMap["linux"].([]any); ok {
+				for _, cmd := range linuxCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PreShell.Linux = append(result.PreShell.Linux, cmdStr)
+					}
+				}
+			}
+			if darwinCmds, ok := preShellMap["darwin"].([]any); ok {
+				for _, cmd := range darwinCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PreShell.Darwin = append(result.PreShell.Darwin, cmdStr)
+					}
 				}
 			}
 		}
 	}
-	// PostShell (optional)
+	// PostShell (optional) - can be array or object with OS-specific arrays
 	if postShellObj, ok := obj["postShell"]; ok {
-		if postShell, ok := postShellObj.([]any); ok {
-			for _, cmd := range postShell {
+		if postShellArray, ok := postShellObj.([]any); ok {
+			// Simple array format - applies to all OS
+			for _, cmd := range postShellArray {
 				if cmdStr, ok := cmd.(string); ok {
-					result.PostShell = append(result.PostShell, cmdStr)
+					result.PostShell.All = append(result.PostShell.All, cmdStr)
+				}
+			}
+		} else if postShellMap, ok := postShellObj.(map[string]any); ok {
+			// OS-specific format
+			if windowsCmds, ok := postShellMap["windows"].([]any); ok {
+				for _, cmd := range windowsCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PostShell.Windows = append(result.PostShell.Windows, cmdStr)
+					}
+				}
+			}
+			if linuxCmds, ok := postShellMap["linux"].([]any); ok {
+				for _, cmd := range linuxCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PostShell.Linux = append(result.PostShell.Linux, cmdStr)
+					}
+				}
+			}
+			if darwinCmds, ok := postShellMap["darwin"].([]any); ok {
+				for _, cmd := range darwinCmds {
+					if cmdStr, ok := cmd.(string); ok {
+						result.PostShell.Darwin = append(result.PostShell.Darwin, cmdStr)
+					}
 				}
 			}
 		}
