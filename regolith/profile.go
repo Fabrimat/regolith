@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,27 +14,103 @@ import (
 	"github.com/otiai10/copy"
 )
 
-// runDirectShellCommand executes a shell command directly in the parent shell (no venv/subshell)
-// and allows environment variable injection.
-func runDirectShellCommand(command string) error {
-	Logger.Debugf("Executing shell command: %s", command)
-	// On Windows, use powershell.exe -Command; on Unix, use /bin/sh -c
-	var shell, flag string
-	if runtime.GOOS == "windows" {
-		shell = "powershell.exe"
-		flag = "-Command"
-	} else {
-		shell = "sh"
-		flag = "-c"
+// runShellCommands executes multiple shell commands in a single shell session,
+// allowing environment variables to persist across commands and be injected into the parent process.
+func runShellCommands(commands []string) error {
+	if len(commands) == 0 {
+		return nil
 	}
-	cmd := exec.Command(shell, flag, command)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	if runtime.GOOS == "windows" {
+		return runShellCommandsWindows(commands)
+	}
+	return runShellCommandsUnix(commands)
+}
+
+// runShellCommandsWindows executes commands in PowerShell and captures environment changes
+func runShellCommandsWindows(commands []string) error {
+	// Build a script that:
+	// 1. Executes all user commands
+	// 2. Outputs environment variables in a parseable format
+	script := ""
+	for _, cmd := range commands {
+		Logger.Debugf("Executing shell command: %s", cmd)
+		script += cmd + "; "
+	}
+	// Output all environment variables after commands execute
+	script += "[Environment]::GetEnvironmentVariables('Process').GetEnumerator() | ForEach-Object { Write-Output \"__REGOLITH_ENV__$($_.Key)=$($_.Value)\" }"
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	cmd.Stdin = os.Stdin
-	// Inherit environment from parent
-	cmd.Env = os.Environ()
-	// Run synchronously
-	return cmd.Run()
+	cmd.Stderr = os.Stderr
+
+	// Capture stdout to parse environment variables
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	// Display output (excluding our env markers)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "__REGOLITH_ENV__") {
+			// Parse and set environment variable
+			envLine := strings.TrimPrefix(line, "__REGOLITH_ENV__")
+			if idx := strings.Index(envLine, "="); idx > 0 {
+				key := envLine[:idx]
+				value := strings.TrimSpace(envLine[idx+1:])
+				os.Setenv(key, value)
+			}
+		} else if line != "" {
+			// Print regular output
+			fmt.Println(line)
+		}
+	}
+
+	return nil
+}
+
+// runShellCommandsUnix executes commands in sh and captures environment changes
+func runShellCommandsUnix(commands []string) error {
+	// Build a script that:
+	// 1. Executes all user commands
+	// 2. Outputs environment variables in a parseable format
+	script := "set -e\n" // Exit on error
+	for _, cmd := range commands {
+		Logger.Debugf("Executing shell command: %s", cmd)
+		script += cmd + "\n"
+	}
+	// Output all environment variables after commands execute
+	script += "env | while IFS='=' read -r key value; do echo \"__REGOLITH_ENV__$key=$value\"; done"
+
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+
+	// Capture stdout to parse environment variables
+	output, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	// Display output (excluding our env markers)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "__REGOLITH_ENV__") {
+			// Parse and set environment variable
+			envLine := strings.TrimPrefix(line, "__REGOLITH_ENV__")
+			if idx := strings.Index(envLine, "="); idx > 0 {
+				key := envLine[:idx]
+				value := strings.TrimSpace(envLine[idx+1:])
+				os.Setenv(key, value)
+			}
+		} else if line != "" {
+			// Print regular output
+			fmt.Println(line)
+		}
+	}
+
+	return nil
 }
 
 // SetupTmpFiles set up the workspace for the filters.
@@ -255,17 +332,13 @@ start:
 		if err != nil {
 			return burrito.WrapErrorf(err, runContextGetProfileError)
 		}
-		if len(profile.PreShell) > 0 {
-			Logger.Info("Running preShell commands...")
-			for _, cmd := range profile.PreShell {
-				err := runDirectShellCommand(cmd)
-				if err != nil {
-					return burrito.WrapErrorf(err, "PreShell command failed: %s", cmd)
-				}
-			}
+	if len(profile.PreShell) > 0 {
+		Logger.Info("Running preShell commands...")
+		err := runShellCommands(profile.PreShell)
+		if err != nil {
+			return burrito.WrapErrorf(err, "PreShell commands failed")
 		}
-
-		// Prepare tmp files
+	}		// Prepare tmp files
 		err = SetupTmpFiles(context)
 		if err != nil {
 			return burrito.WrapErrorf(err, setupTmpFilesError, context.DotRegolithPath)
@@ -301,18 +374,16 @@ start:
 		}
 		Logger.Debug("Done in ", time.Since(start))
 
-		// Execute postShell commands if present
-		if len(profile.PostShell) > 0 {
-			Logger.Info("Running postShell commands...")
-			for _, cmd := range profile.PostShell {
-				err := runDirectShellCommand(cmd)
-				if err != nil {
-					return burrito.WrapErrorf(err, "PostShell command failed: %s", cmd)
-				}
-			}
+	// Execute postShell commands if present
+	if len(profile.PostShell) > 0 {
+		Logger.Info("Running postShell commands...")
+		err := runShellCommands(profile.PostShell)
+		if err != nil {
+			return burrito.WrapErrorf(err, "PostShell commands failed")
 		}
+	}
 
-		return nil
+	return nil
 }
 
 // RunProfileImpl runs the profile from the given context and returns true
