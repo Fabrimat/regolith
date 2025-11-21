@@ -327,52 +327,54 @@ func CheckProfileImpl(
 // times in case of interruptions (changes in the source files).
 func RunProfile(context RunContext) error {
 start:
-		// Execute preShell commands if present
-		profile, err := context.GetProfile()
-		if err != nil {
-			return burrito.WrapErrorf(err, runContextGetProfileError)
-		}
+	// Execute preShell commands if present
+	profile, err := context.GetProfile()
+	if err != nil {
+		return burrito.WrapErrorf(err, runContextGetProfileError)
+	}
 	if len(profile.PreShell) > 0 {
 		Logger.Info("Running preShell commands...")
 		err := runShellCommands(profile.PreShell)
 		if err != nil {
 			return burrito.WrapErrorf(err, "PreShell commands failed")
 		}
-	}		// Prepare tmp files
-		err = SetupTmpFiles(context)
-		if err != nil {
-			return burrito.WrapErrorf(err, setupTmpFilesError, context.DotRegolithPath)
-		}
-		if context.IsInterrupted() {
-			goto start
-		}
-		// Run the profile
-		interrupted, err := RunProfileImpl(context)
-		if err != nil {
-			return burrito.PassError(err)
-		}
-		if interrupted {
-			goto start
-		}
-		// Export files
-		Logger.Info("Moving files to target directory.")
-		start := time.Now()
-		if context.IsInWatchMode() {
-			context.fileWatchingStage <- "pause"
-		}
-		err = ExportProject(context)
-		if context.IsInWatchMode() {
-			// We need to restart the watcher before error handling. See:
-			// https://github.com/Bedrock-OSS/regolith/pull/297#issuecomment-2411981894
-			context.fileWatchingStage <- "restart"
-		}
-		if err != nil {
-			return burrito.WrapError(err, exportProjectError)
-		}
-		if context.IsInterrupted("data") {
-			goto start
-		}
-		Logger.Debug("Done in ", time.Since(start))
+	}
+
+	// Prepare tmp files
+	err = SetupTmpFiles(context)
+	if err != nil {
+		return burrito.WrapErrorf(err, setupTmpFilesError, context.DotRegolithPath)
+	}
+	if context.IsInterrupted() {
+		goto start
+	}
+	// Run the profile
+	interrupted, err := RunProfileImpl(context)
+	if err != nil {
+		return burrito.PassError(err)
+	}
+	if interrupted {
+		goto start
+	}
+	// Export files
+	Logger.Info("Moving files to target directory.")
+	start := time.Now()
+	if context.IsInWatchMode() {
+		context.fileWatchingStage <- "pause"
+	}
+	err = ExportProject(context)
+	if context.IsInWatchMode() {
+		// We need to restart the watcher before error handling. See:
+		// https://github.com/Bedrock-OSS/regolith/pull/297#issuecomment-2411981894
+		context.fileWatchingStage <- "restart"
+	}
+	if err != nil {
+		return burrito.WrapError(err, exportProjectError)
+	}
+	if context.IsInterrupted("data") {
+		goto start
+	}
+	Logger.Debug("Done in ", time.Since(start))
 
 	// Execute postShell commands if present
 	if len(profile.PostShell) > 0 {
