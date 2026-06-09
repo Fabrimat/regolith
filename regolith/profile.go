@@ -226,8 +226,8 @@ func SetupTmpFiles(context RunContext) error {
 
 	// Copy the contents of the 'regolith' folder to '[dotRegolithPath]/tmp'
 	Logger.Debugf("Copying project files to \"%s\"", absTmpPath)
-	// Avoid repetitive code of preparing ResourceFolder, BehaviorFolder
-	// and DataPath with a closure
+	// Avoid repetitive code of preparing each pack folder and the data
+	// folder with a closure
 	setupTmpDirectory := func(
 		path, shortName, descriptiveName string,
 	) error {

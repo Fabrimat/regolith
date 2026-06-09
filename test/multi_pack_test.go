@@ -245,7 +245,7 @@ func TestGetPackExportPathLocalAndExact(t *testing.T) {
 	regolith.InitLogging(true)
 	ctx := regolith.RunContext{
 		Config: &regolith.Config{
-			Name: "proj",
+			Name:            "proj",
 			RegolithProject: regolith.RegolithProject{FormatVersion: "1.9.0"},
 		},
 	}
@@ -536,6 +536,59 @@ func TestMultiPackExactExport(t *testing.T) {
 	comparePaths(filepath.Join(workingDir, "packs", "BP"), filepath.Join(tmpDir, "out", "BP"), t)
 	comparePaths(filepath.Join(workingDir, "packs", "BP1"), filepath.Join(tmpDir, "out", "BP1"), t)
 	comparePaths(filepath.Join(workingDir, "packs", "RP"), filepath.Join(tmpDir, "out", "RP"), t)
+}
+
+func TestMultiPackDevelopmentExport(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(minimalProjectPath, workingDir, t)
+
+	mojangDir := filepath.Join(tmpDir, "com.mojang")
+	if err := os.MkdirAll(mojangDir, 0755); err != nil {
+		t.Fatal("Unable to create fake com.mojang directory:", err)
+	}
+	t.Setenv("COM_MOJANG_PACKS", mojangDir)
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "regolith_test_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"profiles": {
+				"dev": {
+					"filters": [],
+					"export": { "target": "development", "build": "standard" }
+				}
+			},
+			"dataPath": "./packs/data"
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal("Unable to write multi-pack development config:", err)
+	}
+
+	os.Chdir(workingDir)
+	if err := regolith.Run("dev", []string{}, false, "", false, false, false); err != nil {
+		t.Fatal("First multi-pack development run failed:", err)
+	}
+
+	srcBp := filepath.Join(workingDir, "packs", "BP")
+	srcRp := filepath.Join(workingDir, "packs", "RP")
+	comparePaths(srcBp, filepath.Join(mojangDir, "development_behavior_packs", "regolith_test_project_bp"), t)
+	comparePaths(srcBp, filepath.Join(mojangDir, "development_behavior_packs", "regolith_test_project_bp1"), t)
+	comparePaths(srcRp, filepath.Join(mojangDir, "development_resource_packs", "regolith_test_project_rp"), t)
+
+	if err := regolith.Run("dev", []string{}, false, "", false, false, false); err != nil {
+		t.Fatal("Second multi-pack development run failed safety checks:", err)
+	}
 }
 
 func TestMultiPackExactExportMissingPathFails(t *testing.T) {

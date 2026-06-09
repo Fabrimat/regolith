@@ -30,19 +30,19 @@ type Config struct {
 // for a profile, which denotes where compiled files will go.
 // When editing, adjust ExportTargetFromObject function as well.
 type ExportTarget struct {
-	Target    string `json:"target,omitempty"` // The mode of exporting. "develop" or "exact"
-	RpPath    string `json:"rpPath,omitempty"` // Relative or absolute path to resource pack for "exact" export target
-	BpPath    string `json:"bpPath,omitempty"` // Relative or absolute path to resource pack for "exact" export target
-	RpName    string `json:"rpName,omitempty"`
-	BpName    string `json:"bpName,omitempty"`
-	WorldName string `json:"worldName,omitempty"`
-	WorldPath string `json:"worldPath,omitempty"`
-	ReadOnly  bool   `json:"readOnly"`        // Whether the exported files should be read-only
-	Build     string `json:"build,omitempty"` // The type of Minecraft build for the 'develop'
-	BpNames map[string]string `json:"bpNames,omitempty"` // per-pack name overrides (>=1.9.0)
-	RpNames map[string]string `json:"rpNames,omitempty"`
-	BpPaths map[string]string `json:"bpPaths,omitempty"` // per-pack "exact" paths (>=1.9.0)
-	RpPaths map[string]string `json:"rpPaths,omitempty"`
+	Target    string            `json:"target,omitempty"`    // The mode of exporting. "develop" or "exact"
+	RpPath    string            `json:"rpPath,omitempty"`    // Relative or absolute path to resource pack for "exact" export target
+	BpPath    string            `json:"bpPath,omitempty"`    // Relative or absolute path to behavior pack for "exact" export target
+	RpName    string            `json:"rpName,omitempty"`
+	BpName    string            `json:"bpName,omitempty"`
+	WorldName string            `json:"worldName,omitempty"`
+	WorldPath string            `json:"worldPath,omitempty"`
+	ReadOnly  bool              `json:"readOnly"`            // Whether the exported files should be read-only
+	Build     string            `json:"build,omitempty"`     // The type of Minecraft build for the 'develop'
+	BpNames   map[string]string `json:"bpNames,omitempty"`   // per-pack name overrides (>=1.9.0)
+	RpNames   map[string]string `json:"rpNames,omitempty"`
+	BpPaths   map[string]string `json:"bpPaths,omitempty"`   // per-pack "exact" paths (>=1.9.0)
+	RpPaths   map[string]string `json:"rpPaths,omitempty"`
 }
 
 // ExportTargets is the config representation of a profile's "export" value.

@@ -723,9 +723,10 @@ func exportProjectData(profile Profile, ctx RunContext) error {
 	return nil
 }
 
-// InplaceExportProject copies the files from the tmp paths (tmp/BP, tmp/RP and
-// tmp/data) into the project's source files. It's used by the "regolith apply-filter"
-// command. This operation is destructive and cannot be undone.
+// InplaceExportProject copies the files from every pack's tmp folder
+// (tmp/BP, tmp/BP1, …, tmp/RP, … and tmp/data) back into the project's source
+// files. It's used by the "regolith apply-filter" command. This operation is
+// destructive and cannot be undone.
 func InplaceExportProject(
 	config *Config, dotRegolithPath string,
 ) (err error) {
