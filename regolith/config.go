@@ -39,6 +39,10 @@ type ExportTarget struct {
 	WorldPath string `json:"worldPath,omitempty"`
 	ReadOnly  bool   `json:"readOnly"`        // Whether the exported files should be read-only
 	Build     string `json:"build,omitempty"` // The type of Minecraft build for the 'develop'
+	BpNames map[string]string `json:"bpNames,omitempty"` // per-pack name overrides (>=1.9.0)
+	RpNames map[string]string `json:"rpNames,omitempty"`
+	BpPaths map[string]string `json:"bpPaths,omitempty"` // per-pack "exact" paths (>=1.9.0)
+	RpPaths map[string]string `json:"rpPaths,omitempty"`
 }
 
 // ExportTargets is the config representation of a profile's "export" value.
@@ -500,5 +504,26 @@ func ExportTargetFromObject(obj map[string]any) (ExportTarget, error) {
 	// Build - can be empty
 	build, _ := obj["build"].(string)
 	result.Build = build
+	// Per-pack overrides (used only for formatVersion >= 1.9.0 multi-pack).
+	result.BpNames = stringMapFromObject(obj, "bpNames")
+	result.RpNames = stringMapFromObject(obj, "rpNames")
+	result.BpPaths = stringMapFromObject(obj, "bpPaths")
+	result.RpPaths = stringMapFromObject(obj, "rpPaths")
 	return result, nil
+}
+
+// stringMapFromObject reads a JSON object value into a map[string]string,
+// returning nil when the key is absent or not an object.
+func stringMapFromObject(obj map[string]any, key string) map[string]string {
+	raw, ok := obj[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	result := make(map[string]string, len(raw))
+	for k, v := range raw {
+		if s, ok := v.(string); ok {
+			result[k] = s
+		}
+	}
+	return result
 }

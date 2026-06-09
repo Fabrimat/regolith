@@ -178,6 +178,32 @@ func TestPacksMarshal_MultiProducesMaps(t *testing.T) {
 	}
 }
 
+func TestExportTargetParsesPerPackMaps(t *testing.T) {
+	obj := map[string]any{
+		"target": "exact",
+		"bpPath": "../out/BP",
+		"bpPaths": map[string]any{
+			"BP1": "../out/BP1",
+		},
+		"bpNames": map[string]any{
+			"BP1": "'addon_bp'",
+		},
+	}
+	target, err := regolith.ExportTargetFromObject(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.BpPaths["BP1"] != "../out/BP1" {
+		t.Fatalf("expected bpPaths[BP1], got %+v", target.BpPaths)
+	}
+	if target.BpNames["BP1"] != "'addon_bp'" {
+		t.Fatalf("expected bpNames[BP1], got %+v", target.BpNames)
+	}
+	if target.BpPath != "../out/BP" {
+		t.Fatalf("expected bpPath preserved, got %q", target.BpPath)
+	}
+}
+
 func TestSetupTmpFilesCreatesAllPackFolders(t *testing.T) {
 	defer os.Chdir(getWdOrFatal(t))
 	tmpDir := prepareTestDirectory(
