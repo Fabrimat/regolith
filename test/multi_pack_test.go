@@ -406,6 +406,31 @@ func assertFileContentForTest(t *testing.T, path, want string) {
 	}
 }
 
+func TestWatchRootsIncludeAllPackSources(t *testing.T) {
+	config := &regolith.Config{
+		Packs: regolith.Packs{
+			BehaviorPacks: []regolith.Pack{
+				{Name: "BP", Source: "./packs/BP"},
+				{Name: "BP1", Source: "./packs/addon"},
+			},
+			ResourcePacks: []regolith.Pack{{Name: "RP", Source: "./packs/RP"}},
+		},
+		RegolithProject: regolith.RegolithProject{DataPath: "./packs/data"},
+	}
+	roots := regolith.WatchRootsForTest(config)
+	for _, want := range []string{"./packs/BP", "./packs/addon", "./packs/RP", "./packs/data"} {
+		found := false
+		for _, r := range roots {
+			if r == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("watch roots missing %q: %v", want, roots)
+		}
+	}
+}
+
 func TestMultiPackLocalExport(t *testing.T) {
 	defer os.Chdir(getWdOrFatal(t))
 	tmpDir := prepareTestDirectory(
