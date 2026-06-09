@@ -40,6 +40,115 @@ func GetExportPaths(
 	return
 }
 
+// GetPackExportPath returns the export destination for a single pack. For
+// formatVersion < 1.9.0 (single pack only) it delegates to the legacy
+// GetExportPaths so behavior is unchanged. For >=1.9.0 it resolves a
+// destination per pack using the 1.4.0-style com.mojang lookup.
+func GetPackExportPath(
+	exportTarget ExportTarget, ctx RunContext, pack Pack, packType string,
+) (string, error) {
+	if semver.Compare("v"+ctx.Config.FormatVersion, "v1.9.0") < 0 {
+		bpPath, rpPath, err := GetExportPaths(exportTarget, ctx)
+		if err != nil {
+			return "", burrito.PassError(err)
+		}
+		if packType == "bp" {
+			return bpPath, nil
+		}
+		return rpPath, nil
+	}
+	name, err := GetExportName(exportTarget, ctx, pack, packType)
+	if err != nil {
+		return "", burrito.PassError(err)
+	}
+	switch exportTarget.Target {
+	case "development":
+		comMojang, err := FindMojangDir(exportTarget.Build, PacksPath)
+		if err != nil {
+			return "", burrito.PassError(err)
+		}
+		subDir := "development_behavior_packs"
+		if packType == "rp" {
+			subDir = "development_resource_packs"
+		}
+		return comMojang + "/" + subDir + "/" + name, nil
+	case "world":
+		return getWorldPackExportPath(exportTarget, packType, name)
+	case "exact":
+		return getExactPackExportPath(exportTarget, pack, packType)
+	case "local":
+		return "build/" + name + "/", nil
+	case "none":
+		return "", nil
+	default:
+		return "", burrito.WrappedErrorf(
+			"Export target %q is not valid", exportTarget.Target)
+	}
+}
+
+func getWorldPackExportPath(
+	exportTarget ExportTarget, packType, name string,
+) (string, error) {
+	subDir := "behavior_packs"
+	if packType == "rp" {
+		subDir = "resource_packs"
+	}
+	if exportTarget.WorldPath != "" {
+		if exportTarget.WorldName != "" {
+			return "", burrito.WrappedError(
+				"Using both \"worldName\" and \"worldPath\" is not allowed.")
+		}
+		wPath, err := ResolvePath(exportTarget.WorldPath)
+		if err != nil {
+			return "", burrito.WrapError(err, "Failed to resolve world path.")
+		}
+		return filepath.Join(wPath, subDir, name), nil
+	}
+	if exportTarget.WorldName != "" {
+		dir, err := FindMojangDir(exportTarget.Build, WorldPath)
+		if err != nil {
+			return "", burrito.WrapError(
+				err, "Failed to find \"com.mojang\" directory.")
+		}
+		worlds, err := ListWorlds(dir)
+		if err != nil {
+			return "", burrito.WrapError(err, "Failed to list worlds.")
+		}
+		for _, world := range worlds {
+			if world.Name == exportTarget.WorldName {
+				return filepath.Join(world.Path, subDir, name), nil
+			}
+		}
+		return "", burrito.WrappedErrorf(
+			"Failed to find the world.\nWorld name: %s", exportTarget.WorldName)
+	}
+	return "", burrito.WrappedError(
+		"The \"world\" export target requires either a \"worldName\" or " +
+			"\"worldPath\" property")
+}
+
+func getExactPackExportPath(
+	exportTarget ExportTarget, pack Pack, packType string,
+) (string, error) {
+	pathsMap := exportTarget.BpPaths
+	singlePath := exportTarget.BpPath
+	primaryName := "BP"
+	pluralKey := "bpPaths"
+	if packType == "rp" {
+		pathsMap = exportTarget.RpPaths
+		singlePath = exportTarget.RpPath
+		primaryName = "RP"
+		pluralKey = "rpPaths"
+	}
+	if raw, ok := pathsMap[pack.Name]; ok {
+		return ResolvePath(raw)
+	}
+	if pack.Name == primaryName && singlePath != "" {
+		return ResolvePath(singlePath)
+	}
+	return "", burrito.WrappedErrorf(exactPathMissingError, pack.Name, pluralKey)
+}
+
 func FindMojangDir(build string, pathType ComMojangPathType) (string, error) {
 	switch build {
 	case "standard":

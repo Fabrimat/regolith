@@ -295,4 +295,8 @@ const (
 	userSettingIncorrectKeyUseError = "Cannot use <key> with non-map property."
 
 	getRunnerError = "Failed to get the path to filter runner."
+
+	// Error when an "exact" export target has no path for a given pack.
+	exactPathMissingError = "No \"exact\" export path configured for pack %q.\n" +
+		"Add it to the %q map of the export target."
 )

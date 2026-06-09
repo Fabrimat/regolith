@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,6 +238,53 @@ func TestGetExportNameDefaultsAndOverrides(t *testing.T) {
 		if got != c.want {
 			t.Fatalf("pack %s: want %q got %q", c.pack.Name, c.want, got)
 		}
+	}
+}
+
+func TestGetPackExportPathLocalAndExact(t *testing.T) {
+	regolith.InitLogging(true)
+	ctx := regolith.RunContext{
+		Config: &regolith.Config{
+			Name: "proj",
+			RegolithProject: regolith.RegolithProject{FormatVersion: "1.9.0"},
+		},
+	}
+	// local target -> build/<name>/
+	localBp, err := regolith.GetPackExportPath(
+		regolith.ExportTarget{Target: "local"}, ctx,
+		regolith.Pack{Name: "BP1"}, "bp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localBp != "build/proj_bp1/" {
+		t.Fatalf("local: got %q", localBp)
+	}
+	// exact target with a per-pack map
+	exact := regolith.ExportTarget{
+		Target:  "exact",
+		BpPath:  "out/BP",
+		BpPaths: map[string]string{"BP1": "out/BP1"},
+	}
+	primary, err := regolith.GetPackExportPath(exact, ctx, regolith.Pack{Name: "BP"}, "bp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(primary), "out/BP") {
+		t.Fatalf("exact primary: got %q", primary)
+	}
+	addon, err := regolith.GetPackExportPath(exact, ctx, regolith.Pack{Name: "BP1"}, "bp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(addon), "out/BP1") {
+		t.Fatalf("exact addon: got %q", addon)
+	}
+	// exact target missing a path for an extra pack -> error
+	_, err = regolith.GetPackExportPath(
+		regolith.ExportTarget{Target: "exact", BpPath: "out/BP"}, ctx,
+		regolith.Pack{Name: "BP1"}, "bp")
+	if err == nil {
+		t.Fatal("expected error for extra pack without exact path")
 	}
 }
 
