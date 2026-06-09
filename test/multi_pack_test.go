@@ -472,3 +472,25 @@ func TestMultiPackLocalExport(t *testing.T) {
 		t.Fatal("second run failed:", err)
 	}
 }
+
+const multiPackProjectPath = "testdata/multi_pack/project"
+
+func TestMultiPackProjectLocalBuild(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	copyFilesOrFatal(multiPackProjectPath, tmpDir, t)
+	os.Chdir(tmpDir)
+	if err := regolith.Run("dev", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("run failed:", err)
+	}
+	comparePaths(
+		filepath.Join(tmpDir, "packs", "BP"),
+		filepath.Join(tmpDir, "build", "multi_pack_project_bp"), t)
+	comparePaths(
+		filepath.Join(tmpDir, "packs", "BP1"),
+		filepath.Join(tmpDir, "build", "multi_pack_project_bp1"), t)
+	comparePaths(
+		filepath.Join(tmpDir, "packs", "RP"),
+		filepath.Join(tmpDir, "build", "multi_pack_project_rp"), t)
+}
