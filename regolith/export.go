@@ -755,38 +755,57 @@ func InplaceExportProject(
 			}
 		}
 	}()
-	// Delete RP, BP and data before replacing them with files from tmp
-	deleteDirs := []string{
-		config.Packs.PrimaryResourceSource(), config.Packs.PrimaryBehaviorSource(), config.DataPath}
-	for _, deleteDir := range deleteDirs {
-		if deleteDir != "" {
-			err = revertibleOps.Delete(deleteDir)
-			if err != nil {
-				err = burrito.WrapErrorf(
-					err, updateSourceFilesError, deleteDir)
-				return err // Overwritten by defer
-			}
+	// Delete every pack source and data before replacing them with files from
+	// tmp.
+	var deleteDirs []string
+	for _, pack := range config.Packs.BehaviorPacks {
+		if pack.Source != "" {
+			deleteDirs = append(deleteDirs, pack.Source)
 		}
 	}
-	// Move files from tmp to RP, BP and data
+	for _, pack := range config.Packs.ResourcePacks {
+		if pack.Source != "" {
+			deleteDirs = append(deleteDirs, pack.Source)
+		}
+	}
+	if config.DataPath != "" {
+		deleteDirs = append(deleteDirs, config.DataPath)
+	}
+	for _, deleteDir := range deleteDirs {
+		err = revertibleOps.Delete(deleteDir)
+		if err != nil {
+			err = burrito.WrapErrorf(err, updateSourceFilesError, deleteDir)
+			return err // Overwritten by defer
+		}
+	}
+	// Move files from tmp to each pack source and data.
 	absWorkingDir, err := GetAbsoluteWorkingDirectory(dotRegolithPath)
 	if err != nil {
 		return burrito.WrapError(err, getAbsoluteWorkingDirectoryError)
 	}
-	moveFiles := [][2]string{
-		{filepath.Join(absWorkingDir, "RP"), config.Packs.PrimaryResourceSource()},
-		{filepath.Join(absWorkingDir, "BP"), config.Packs.PrimaryBehaviorSource()},
-		{filepath.Join(absWorkingDir, "data"), config.DataPath},
+	moveFiles := [][2]string{}
+	for _, pack := range config.Packs.BehaviorPacks {
+		if pack.Source != "" {
+			moveFiles = append(moveFiles,
+				[2]string{filepath.Join(absWorkingDir, pack.Name), pack.Source})
+		}
+	}
+	for _, pack := range config.Packs.ResourcePacks {
+		if pack.Source != "" {
+			moveFiles = append(moveFiles,
+				[2]string{filepath.Join(absWorkingDir, pack.Name), pack.Source})
+		}
+	}
+	if config.DataPath != "" {
+		moveFiles = append(moveFiles,
+			[2]string{filepath.Join(absWorkingDir, "data"), config.DataPath})
 	}
 	for _, moveFile := range moveFiles {
 		source, target := moveFile[0], moveFile[1]
-		if source != "" {
-			err = revertibleOps.MoveOrCopyDir(source, target)
-			if err != nil {
-				err = burrito.WrapErrorf(
-					err, moveOrCopyError, source, target)
-				return err // Overwritten by defer
-			}
+		err = revertibleOps.MoveOrCopyDir(source, target)
+		if err != nil {
+			err = burrito.WrapErrorf(err, moveOrCopyError, source, target)
+			return err // Overwritten by defer
 		}
 	}
 	return err // Can be altered by defer

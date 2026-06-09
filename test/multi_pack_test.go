@@ -324,6 +324,88 @@ func TestSetupTmpFilesCreatesAllPackFolders(t *testing.T) {
 	}
 }
 
+func TestMultiPackInplaceExportRestoresAllSources(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	regolith.InitLogging(true)
+	defer regolith.ShutdownLogging()
+
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	copyFilesOrFatal(minimalProjectPath, tmpDir, t)
+
+	// Add a second behavior pack source.
+	if err := os.MkdirAll(filepath.Join(tmpDir, "packs", "BP1"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(tmpDir, "packs", "BP1", "old.txt"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	config := []byte(`{
+		"$schema": "x",
+		"name": "regolith_test_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP1" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"profiles": { "dev": { "filters": [], "export": { "target": "local" } } },
+			"dataPath": "./packs/data"
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(tmpDir)
+
+	// Populate the tmp pack folders as if filters had produced output.
+	tmpRoot := filepath.Join(tmpDir, ".regolith", "tmp")
+	for name, content := range map[string]string{
+		"BP": "bp-out", "BP1": "bp1-out", "RP": "rp-out", "data": "data-out",
+	} {
+		dir := filepath.Join(tmpRoot, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "out.txt"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	configMap, err := regolith.LoadConfigAsMap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := regolith.ConfigFromObject(configMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := regolith.InplaceExportProject(parsed, ".regolith"); err != nil {
+		t.Fatal("InplaceExportProject failed:", err)
+	}
+
+	// Each pack source now holds the tmp output; the old BP1 file is gone.
+	assertFileContentForTest(t, filepath.Join(tmpDir, "packs", "BP", "out.txt"), "bp-out")
+	assertFileContentForTest(t, filepath.Join(tmpDir, "packs", "BP1", "out.txt"), "bp1-out")
+	assertFileContentForTest(t, filepath.Join(tmpDir, "packs", "RP", "out.txt"), "rp-out")
+	if _, err := os.Stat(filepath.Join(tmpDir, "packs", "BP1", "old.txt")); !os.IsNotExist(err) {
+		t.Fatal("expected old BP1 file to be replaced")
+	}
+}
+
+func assertFileContentForTest(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %q: %v", path, err)
+	}
+	if string(data) != want {
+		t.Fatalf("%q: want %q got %q", path, want, string(data))
+	}
+}
+
 func TestMultiPackLocalExport(t *testing.T) {
 	defer os.Chdir(getWdOrFatal(t))
 	tmpDir := prepareTestDirectory(
