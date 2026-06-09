@@ -1,10 +1,20 @@
 package test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/Bedrock-OSS/regolith/regolith"
 )
+
+func mustUnmarshalObject(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatal(err)
+	}
+	return obj
+}
 
 func TestPackSortingAndPrimaryAccessors(t *testing.T) {
 	packs := regolith.Packs{
@@ -34,5 +44,132 @@ func TestPackSortingAndPrimaryAccessors(t *testing.T) {
 	}
 	if !(regolith.Packs{}).IsZero() {
 		t.Fatal("empty packs should report IsZero")
+	}
+}
+
+func TestPacksFromObject_SingleStringSugar(t *testing.T) {
+	obj := map[string]any{
+		"behaviorPack": "./packs/BP",
+		"resourcePack": "./packs/RP",
+	}
+	packs, err := regolith.PacksFromObject(obj, "1.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs.BehaviorPacks) != 1 || packs.BehaviorPacks[0].Name != "BP" ||
+		packs.BehaviorPacks[0].Source != "./packs/BP" {
+		t.Fatalf("unexpected behavior packs: %+v", packs.BehaviorPacks)
+	}
+	if len(packs.ResourcePacks) != 1 || packs.ResourcePacks[0].Name != "RP" {
+		t.Fatalf("unexpected resource packs: %+v", packs.ResourcePacks)
+	}
+}
+
+func TestPacksFromObject_MapForm(t *testing.T) {
+	obj := map[string]any{
+		"behaviorPacks": map[string]any{
+			"BP":  "./packs/BP",
+			"BP1": "./packs/addon",
+		},
+		"resourcePacks": map[string]any{
+			"RP": "./packs/RP",
+		},
+	}
+	packs, err := regolith.PacksFromObject(obj, "1.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs.BehaviorPacks) != 2 ||
+		packs.BehaviorPacks[0].Name != "BP" ||
+		packs.BehaviorPacks[1].Name != "BP1" ||
+		packs.BehaviorPacks[1].Source != "./packs/addon" {
+		t.Fatalf("unexpected behavior packs: %+v", packs.BehaviorPacks)
+	}
+}
+
+func TestPacksFromObject_MapRejectedOnOldVersion(t *testing.T) {
+	obj := map[string]any{
+		"behaviorPacks": map[string]any{"BP": "./packs/BP"},
+	}
+	if _, err := regolith.PacksFromObject(obj, "1.8.0"); err == nil {
+		t.Fatal("expected error for map form on formatVersion 1.8.0")
+	}
+}
+
+func TestPacksFromObject_InvalidKey(t *testing.T) {
+	for _, badKey := range []string{"BP0", "RP0", "pack", "BP01"} {
+		obj := map[string]any{
+			"behaviorPacks": map[string]any{badKey: "./x"},
+		}
+		if _, err := regolith.PacksFromObject(obj, "1.9.0"); err == nil {
+			t.Fatalf("expected error for invalid key %q", badKey)
+		}
+	}
+}
+
+func TestPacksFromObject_MapWithoutPrimaryGetsEmptyPrimary(t *testing.T) {
+	obj := map[string]any{
+		"behaviorPacks": map[string]any{"BP1": "./packs/addon"},
+	}
+	packs, err := regolith.PacksFromObject(obj, "1.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packs.BehaviorPacks) != 2 || packs.BehaviorPacks[0].Name != "BP" ||
+		packs.BehaviorPacks[0].Source != "" {
+		t.Fatalf("expected synthesized empty primary BP first: %+v", packs.BehaviorPacks)
+	}
+}
+
+func TestPacksFromObject_MixedFormRejected(t *testing.T) {
+	obj := map[string]any{
+		"behaviorPack":  "./packs/BP",
+		"behaviorPacks": map[string]any{"BP1": "./x"},
+	}
+	if _, err := regolith.PacksFromObject(obj, "1.9.0"); err == nil {
+		t.Fatal("expected error when mixing behaviorPack and behaviorPacks")
+	}
+}
+
+func TestPacksMarshal_SingleDefaultProducesStrings(t *testing.T) {
+	packs := regolith.Packs{
+		BehaviorPacks: []regolith.Pack{{Name: "BP", Source: "./packs/BP"}},
+		ResourcePacks: []regolith.Pack{{Name: "RP", Source: "./packs/RP"}},
+	}
+	data, err := json.Marshal(packs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		t.Fatal(err)
+	}
+	if obj["behaviorPack"] != "./packs/BP" {
+		t.Fatalf("expected behaviorPack string, got: %s", data)
+	}
+	if _, isMap := obj["behaviorPacks"]; isMap {
+		t.Fatalf("single pack should not marshal as map: %s", data)
+	}
+}
+
+func TestPacksMarshal_MultiProducesMaps(t *testing.T) {
+	packs := regolith.Packs{
+		BehaviorPacks: []regolith.Pack{
+			{Name: "BP", Source: "./packs/BP"},
+			{Name: "BP1", Source: "./packs/addon"},
+		},
+		ResourcePacks: []regolith.Pack{{Name: "RP", Source: "./packs/RP"}},
+	}
+	data, err := json.Marshal(packs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roundTrip, err := regolith.PacksFromObject(mustUnmarshalObject(t, data), "1.9.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roundTrip.BehaviorPacks) != 2 ||
+		roundTrip.BehaviorPacks[1].Name != "BP1" {
+		t.Fatalf("round trip lost packs: %+v", roundTrip.BehaviorPacks)
 	}
 }
