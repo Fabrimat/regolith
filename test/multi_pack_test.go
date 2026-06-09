@@ -323,3 +323,45 @@ func TestSetupTmpFilesCreatesAllPackFolders(t *testing.T) {
 			filepath.Join(workingDir, ".regolith", "tmp", packName), t)
 	}
 }
+
+func TestMultiPackLocalExport(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(minimalProjectPath, workingDir, t)
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "regolith_test_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"profiles": {
+				"dev": { "filters": [], "export": { "target": "local" } }
+			},
+			"dataPath": "./packs/data"
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(workingDir)
+	if err := regolith.Run("dev", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("run failed:", err)
+	}
+	srcBp := filepath.Join(workingDir, "packs", "BP")
+	comparePaths(srcBp, filepath.Join(workingDir, "build", "regolith_test_project_bp"), t)
+	comparePaths(srcBp, filepath.Join(workingDir, "build", "regolith_test_project_bp1"), t)
+	comparePaths(
+		filepath.Join(workingDir, "packs", "RP"),
+		filepath.Join(workingDir, "build", "regolith_test_project_rp"), t)
+	// running again must pass file-protection safety checks
+	if err := regolith.Run("dev", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("second run failed:", err)
+	}
+}

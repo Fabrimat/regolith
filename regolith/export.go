@@ -368,10 +368,15 @@ func GetExportName(
 	return ctx.Config.Name + "_" + strings.ToLower(packType) + packSuffix(pack.Name), nil
 }
 
+type resolvedPackExport struct {
+	pack     Pack
+	packType string // "bp" or "rp"
+	destPath string
+}
+
 type resolvedExportTarget struct {
-	target ExportTarget
-	bpPath string
-	rpPath string
+	target      ExportTarget
+	packExports []resolvedPackExport
 }
 
 func normalizeExportPathForCollision(path string) (string, error) {
@@ -419,35 +424,48 @@ func checkExportPathCollision(seen map[string]string, path, label string) error 
 	return nil
 }
 
-// ExportProject copies files from the tmp paths (tmp/BP and tmp/RP) into
-// the project's export targets. The paths are generated with GetExportPaths.
+// ExportProject copies files from the tmp pack folders (tmp/BP, tmp/BP1,
+// tmp/RP, ...) into the project's export targets. Destinations are generated
+// per pack with GetPackExportPath.
 func ExportProject(ctx RunContext) error {
 	MeasureStart("Export - GetExportPaths")
 	profile, err := ctx.GetProfile()
 	if err != nil {
 		return burrito.WrapError(err, runContextGetProfileError)
 	}
-	// Resolve all non-"none" targets before modifying any export path. This
-	// keeps failure atomic when a later target has an invalid path or unsafe
-	// existing files.
+	// Resolve all non-"none" targets (and all their packs) before modifying any
+	// export path, so failure stays atomic.
 	var activeTargets []resolvedExportTarget
 	seenExportPaths := make(map[string]string)
 	for i, exportTarget := range profile.activeExportTargets() {
-		bpPath, rpPath, err := GetExportPaths(exportTarget, ctx)
-		if err != nil {
-			return burrito.WrapError(err, getExportPathsError)
+		var packExports []resolvedPackExport
+		resolvePack := func(pack Pack, packType string) error {
+			destPath, err := GetPackExportPath(exportTarget, ctx, pack, packType)
+			if err != nil {
+				return burrito.WrapError(err, getExportPathsError)
+			}
+			label := fmt.Sprintf(
+				"export target %d (%s) %s pack %q: %s",
+				i+1, exportTarget.Target, packType, pack.Name, destPath)
+			if err := checkExportPathCollision(seenExportPaths, destPath, label); err != nil {
+				return burrito.PassError(err)
+			}
+			packExports = append(packExports, resolvedPackExport{pack, packType, destPath})
+			return nil
 		}
-		targetLabel := fmt.Sprintf("export target %d (%s)", i+1, exportTarget.Target)
-		if err := checkExportPathCollision(seenExportPaths, bpPath, targetLabel+" behavior pack: "+bpPath); err != nil {
-			return burrito.PassError(err)
+		for _, pack := range ctx.Config.Packs.BehaviorPacks {
+			if err := resolvePack(pack, "bp"); err != nil {
+				return burrito.PassError(err)
+			}
 		}
-		if err := checkExportPathCollision(seenExportPaths, rpPath, targetLabel+" resource pack: "+rpPath); err != nil {
-			return burrito.PassError(err)
+		for _, pack := range ctx.Config.Packs.ResourcePacks {
+			if err := resolvePack(pack, "rp"); err != nil {
+				return burrito.PassError(err)
+			}
 		}
 		activeTargets = append(activeTargets, resolvedExportTarget{
-			target: exportTarget,
-			bpPath: bpPath,
-			rpPath: rpPath,
+			target:      exportTarget,
+			packExports: packExports,
 		})
 	}
 	if len(activeTargets) == 0 {
@@ -455,53 +473,49 @@ func ExportProject(ctx RunContext) error {
 		return nil
 	}
 	dotRegolithPath := ctx.DotRegolithPath
-	useSymlink := ctx.SymlinkExport && len(activeTargets) == 1
+	isSinglePack := len(ctx.Config.Packs.BehaviorPacks) == 1 && len(ctx.Config.Packs.ResourcePacks) == 1
+	useSymlink := ctx.SymlinkExport && len(activeTargets) == 1 && isSinglePack
 	editedFiles := LoadEditedFiles(dotRegolithPath)
 	if !useSymlink && !ctx.UnsafeMode {
 		MeasureStart("Export - CheckDeletionSafety")
 		for _, exportTarget := range activeTargets {
-			err = editedFiles.CheckDeletionSafety(exportTarget.rpPath, exportTarget.bpPath)
-			if err != nil {
-				return burrito.WrapErrorf(
-					err, checkDeletionSafetyError, exportTarget.rpPath, exportTarget.bpPath)
+			for _, pe := range exportTarget.packExports {
+				if err := editedFiles.CheckPackDeletionSafety(pe.packType, pe.destPath); err != nil {
+					return burrito.WrapErrorf(
+						err, checkDeletionSafetyError, pe.destPath, pe.destPath)
+				}
 			}
 		}
 	}
 
 	for i, exportTarget := range activeTargets {
-		// Symlink export already placed files for the only active target.
 		if useSymlink && i == 0 {
 			Logger.Debugf("Symlink export is enabled. Skipping RP and BP export.")
-		} else {
-			// Move is only safe when there is exactly one active target
-			// and symlink export is off, since tmp/ is the sole source and
-			// moving from a symlinked tmp would destroy the first target.
-			canMove := len(activeTargets) == 1 && !useSymlink
-			err = exportProjectRpAndBp(
-				exportTarget.target, exportTarget.rpPath, exportTarget.bpPath,
-				ctx, canMove)
-			if err != nil {
-				return burrito.PassError(err)
-			}
+			continue
+		}
+		// Move is only safe when there is exactly one active target and symlink
+		// export is off, since each tmp pack folder is the sole source.
+		canMove := len(activeTargets) == 1 && !useSymlink
+		if err := exportTargetPacks(exportTarget, ctx, canMove); err != nil {
+			return burrito.PassError(err)
 		}
 	}
 	// Export data once (not per target)
 	MeasureStart("Export - ExportData")
-	err = exportProjectData(profile, ctx)
-	if err != nil {
+	if err := exportProjectData(profile, ctx); err != nil {
 		return burrito.PassError(err)
 	}
 	MeasureStart("Export - EditedFiles.UpdateFromPaths")
 	for _, exportTarget := range activeTargets {
-		err = editedFiles.UpdateFromPaths(exportTarget.rpPath, exportTarget.bpPath)
-		if err != nil {
-			return burrito.WrapError(
-				err,
-				"Failed to create a list of files edited by this 'regolith run'")
+		for _, pe := range exportTarget.packExports {
+			if err := editedFiles.UpdatePackFromPath(pe.packType, pe.destPath); err != nil {
+				return burrito.WrapError(
+					err,
+					"Failed to create a list of files edited by this 'regolith run'")
+			}
 		}
 	}
-	err = editedFiles.Dump(dotRegolithPath)
-	if err != nil {
+	if err := editedFiles.Dump(dotRegolithPath); err != nil {
 		return burrito.WrapError(err, updatedFilesDumpError)
 	}
 	MeasureStart("Export - Remove Empty Export Paths")
@@ -509,14 +523,13 @@ func ExportProject(ctx RunContext) error {
 		if useSymlink && i == 0 {
 			continue
 		}
-		for _, packPath := range []string{exportTarget.rpPath, exportTarget.bpPath} {
-			pathEmpty, _ := IsDirEmpty(packPath)
+		for _, pe := range exportTarget.packExports {
+			pathEmpty, _ := IsDirEmpty(pe.destPath)
 			if pathEmpty {
-				if err := os.Remove(packPath); err != nil {
+				if err := os.Remove(pe.destPath); err != nil {
 					Logger.Warnf(
 						"Failed to remove empty pack directory.\n"+
-							"Path: %s\n"+
-							"Error: %v", packPath, err)
+							"Path: %s\nError: %v", pe.destPath, err)
 				}
 			}
 		}
@@ -525,62 +538,48 @@ func ExportProject(ctx RunContext) error {
 	return nil
 }
 
-// exportProjectRpAndBp is a helper function for ExportProject. It exports the
-// 'rp' and 'bp' folders to the target location. Moving is only safe for a
-// single active target without symlink export, since the tmp source must remain
-// intact for additional targets.
-func exportProjectRpAndBp(exportTarget ExportTarget, rpPath, bpPath string, ctx RunContext, allowMove bool) error {
+// exportTargetPacks exports every pack of a resolved target from its tmp folder
+// to its destination. Moving is only allowed for a single active target without
+// symlink export, so the tmp source stays intact for additional targets.
+func exportTargetPacks(rt resolvedExportTarget, ctx RunContext, allowMove bool) error {
 	dotRegolithPath := ctx.DotRegolithPath
-
-	var err error
-	if ctx.DisableSizeTimeCheck {
-		MeasureStart("Export - Clean")
-		if err := removeJunctionSafe(bpPath); err != nil {
-			return burrito.WrapErrorf(
-				err, "Failed to clear behavior pack from build path %q.\n"+
-					"Are user permissions correct?", bpPath)
-		}
-		if err := removeJunctionSafe(rpPath); err != nil {
-			return burrito.WrapErrorf(
-				err, "Failed to clear resource pack from build path %q.\n"+
-					"Are user permissions correct?", rpPath)
-		}
-	}
-	MeasureStart("Export - MoveOrCopy")
 	absWorkingDir, err := GetAbsoluteWorkingDirectory(dotRegolithPath)
 	if err != nil {
 		return burrito.WrapError(err, getAbsoluteWorkingDirectoryError)
 	}
-	var wg sync.WaitGroup
-	packsData := []struct {
-		packPath     string
-		subpathInTmp string
-		packType     string
-	}{
-		{bpPath, "BP", "behavior"},
-		{rpPath, "RP", "resource"},
+	if ctx.DisableSizeTimeCheck {
+		MeasureStart("Export - Clean")
+		for _, pe := range rt.packExports {
+			if err := removeJunctionSafe(pe.destPath); err != nil {
+				return burrito.WrapErrorf(
+					err, "Failed to clear %s pack from build path %q.\n"+
+						"Are user permissions correct?", pe.packType, pe.destPath)
+			}
+		}
 	}
-	errChan := make(chan error, len(packsData))
-	for _, packData := range packsData {
-		packPath, subpathInTmp, packType := packData.packPath, packData.subpathInTmp, packData.packType
+	MeasureStart("Export - MoveOrCopy")
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(rt.packExports))
+	for _, pe := range rt.packExports {
+		pe := pe
+		source := filepath.Join(absWorkingDir, pe.pack.Name)
 		wg.Go(func() {
-			Logger.Infof("Exporting %s pack to \"%s\".", packType, packPath)
+			Logger.Infof("Exporting %s pack %q to \"%s\".", pe.packType, pe.pack.Name, pe.destPath)
 			var e error
 			if !ctx.DisableSizeTimeCheck {
-				e = SyncDirectories(filepath.Join(absWorkingDir, subpathInTmp), packPath, exportTarget.ReadOnly)
+				e = SyncDirectories(source, pe.destPath, rt.target.ReadOnly)
 			} else if allowMove {
-				e = MoveOrCopy(filepath.Join(absWorkingDir, subpathInTmp), packPath, exportTarget.ReadOnly, true)
+				e = MoveOrCopy(source, pe.destPath, rt.target.ReadOnly, true)
 			} else {
-				e = copyExportPath(filepath.Join(absWorkingDir, subpathInTmp), packPath, exportTarget.ReadOnly)
+				e = copyExportPath(source, pe.destPath, rt.target.ReadOnly)
 			}
 			if e != nil {
-				errChan <- burrito.WrapErrorf(e, "Failed to export %s pack.", packType)
+				errChan <- burrito.WrapErrorf(e, "Failed to export %s pack %q.", pe.packType, pe.pack.Name)
 				return
 			}
 			errChan <- nil
 		})
 	}
-
 	wg.Wait()
 	close(errChan)
 	for e := range errChan {
