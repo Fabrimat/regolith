@@ -22,7 +22,7 @@ const GitIgnore = "/build\n/.regolith"
 type Config struct {
 	Name            string `json:"name,omitempty"`
 	Author          string `json:"author,omitempty"`
-	Packs           `json:"packs,omitzero"`
+	Packs           Packs  `json:"packs,omitzero"`
 	RegolithProject `json:"regolith,omitzero"`
 }
 
@@ -157,6 +157,36 @@ func SortPacksForTest(packs []Pack) { sortPacks(packs) }
 
 var behaviorPackKeyRe = regexp.MustCompile(`^BP([1-9][0-9]*)?$`)
 var resourcePackKeyRe = regexp.MustCompile(`^RP([1-9][0-9]*)?$`)
+
+// MarshalJSON writes the single-pack default (one "BP" and/or one "RP") as the
+// legacy string form for backward compatibility, and the multi-pack form as
+// name->path maps.
+func (p Packs) MarshalJSON() ([]byte, error) {
+	obj := map[string]any{}
+	marshalPackList(obj, p.BehaviorPacks, "BP", "behaviorPack", "behaviorPacks")
+	marshalPackList(obj, p.ResourcePacks, "RP", "resourcePack", "resourcePacks")
+	return json.Marshal(obj)
+}
+
+func marshalPackList(
+	obj map[string]any, packs []Pack, primaryName, singularKey, pluralKey string,
+) {
+	isSingleDefault := len(packs) == 1 && packs[0].Name == primaryName
+	if isSingleDefault {
+		if packs[0].Source != "" {
+			obj[singularKey] = packs[0].Source
+		}
+		return
+	}
+	if len(packs) == 0 {
+		return
+	}
+	m := make(map[string]string, len(packs))
+	for _, pack := range packs {
+		m[pack.Name] = pack.Source
+	}
+	obj[pluralKey] = m
+}
 
 // RegolithProject is a part of "config.json" with the regolith namespace
 // within the Minecraft Project Schema

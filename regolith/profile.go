@@ -269,13 +269,13 @@ func SetupTmpFiles(context RunContext) error {
 	errCh := make(chan error, 3)
 
 	wg.Go(func() {
-		if err := setupTmpDirectory(config.PrimaryResourceSource(), "RP", "resource folder"); err != nil {
+		if err := setupTmpDirectory(config.Packs.PrimaryResourceSource(), "RP", "resource folder"); err != nil {
 			errCh <- burrito.WrapErrorf(err, "Failed to setup RP folder in the temporary directory.")
 		}
 	})
 
 	wg.Go(func() {
-		if err := setupTmpDirectory(config.PrimaryBehaviorSource(), "BP", "behavior folder"); err != nil {
+		if err := setupTmpDirectory(config.Packs.PrimaryBehaviorSource(), "BP", "behavior folder"); err != nil {
 			errCh <- burrito.WrapErrorf(err, "Failed to setup BP folder in the temporary directory.")
 		}
 	})

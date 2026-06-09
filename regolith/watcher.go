@@ -51,11 +51,11 @@ func NewDirWatcher(
 	stage <-chan string,
 ) error {
 	var roots []string
-	if config.PrimaryResourceSource() != "" {
-		roots = append(roots, config.PrimaryResourceSource())
+	if config.Packs.PrimaryResourceSource() != "" {
+		roots = append(roots, config.Packs.PrimaryResourceSource())
 	}
-	if config.PrimaryBehaviorSource() != "" {
-		roots = append(roots, config.PrimaryBehaviorSource())
+	if config.Packs.PrimaryBehaviorSource() != "" {
+		roots = append(roots, config.Packs.PrimaryBehaviorSource())
 	}
 	if config.DataPath != "" {
 		roots = append(roots, config.DataPath)
@@ -122,9 +122,9 @@ func (d *DirWatcher) start() {
 			if d.debounce != nil || event.Op.Has(fsnotify.Chmod) {
 				continue
 			}
-			if isInDir(event.Name, d.config.PrimaryResourceSource()) {
+			if isInDir(event.Name, d.config.Packs.PrimaryResourceSource()) {
 				d.interruption <- "rp"
-			} else if isInDir(event.Name, d.config.PrimaryBehaviorSource()) {
+			} else if isInDir(event.Name, d.config.Packs.PrimaryBehaviorSource()) {
 				d.interruption <- "bp"
 			} else if isInDir(event.Name, d.config.DataPath) {
 				d.interruption <- "data"

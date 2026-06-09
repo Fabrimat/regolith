@@ -617,7 +617,7 @@ func InplaceExportProject(
 	}()
 	// Delete RP, BP and data before replacing them with files from tmp
 	deleteDirs := []string{
-		config.PrimaryResourceSource(), config.PrimaryBehaviorSource(), config.DataPath}
+		config.Packs.PrimaryResourceSource(), config.Packs.PrimaryBehaviorSource(), config.DataPath}
 	for _, deleteDir := range deleteDirs {
 		if deleteDir != "" {
 			err = revertibleOps.Delete(deleteDir)
@@ -634,8 +634,8 @@ func InplaceExportProject(
 		return burrito.WrapError(err, getAbsoluteWorkingDirectoryError)
 	}
 	moveFiles := [][2]string{
-		{filepath.Join(absWorkingDir, "RP"), config.PrimaryResourceSource()},
-		{filepath.Join(absWorkingDir, "BP"), config.PrimaryBehaviorSource()},
+		{filepath.Join(absWorkingDir, "RP"), config.Packs.PrimaryResourceSource()},
+		{filepath.Join(absWorkingDir, "BP"), config.Packs.PrimaryBehaviorSource()},
 		{filepath.Join(absWorkingDir, "data"), config.DataPath},
 	}
 	for _, moveFile := range moveFiles {
