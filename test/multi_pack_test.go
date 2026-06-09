@@ -204,6 +204,42 @@ func TestExportTargetParsesPerPackMaps(t *testing.T) {
 	}
 }
 
+func TestGetExportNameDefaultsAndOverrides(t *testing.T) {
+	regolith.InitLogging(true)
+	ctx := regolith.RunContext{
+		Config: &regolith.Config{Name: "proj"},
+	}
+	cases := []struct {
+		pack     regolith.Pack
+		packType string
+		target   regolith.ExportTarget
+		want     string
+	}{
+		{regolith.Pack{Name: "BP"}, "bp", regolith.ExportTarget{}, "proj_bp"},
+		{regolith.Pack{Name: "BP1"}, "bp", regolith.ExportTarget{}, "proj_bp1"},
+		{regolith.Pack{Name: "RP2"}, "rp", regolith.ExportTarget{}, "proj_rp2"},
+		{
+			regolith.Pack{Name: "BP1"}, "bp",
+			regolith.ExportTarget{BpNames: map[string]string{"BP1": "'addon_bp'"}},
+			"addon_bp",
+		},
+		{
+			regolith.Pack{Name: "BP"}, "bp",
+			regolith.ExportTarget{BpName: "'primary_bp'"},
+			"primary_bp",
+		},
+	}
+	for _, c := range cases {
+		got, err := regolith.GetExportName(c.target, ctx, c.pack, c.packType)
+		if err != nil {
+			t.Fatalf("pack %s: %v", c.pack.Name, err)
+		}
+		if got != c.want {
+			t.Fatalf("pack %s: want %q got %q", c.pack.Name, c.want, got)
+		}
+	}
+}
+
 func TestSetupTmpFilesCreatesAllPackFolders(t *testing.T) {
 	defer os.Chdir(getWdOrFatal(t))
 	tmpDir := prepareTestDirectory(

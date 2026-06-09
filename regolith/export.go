@@ -227,6 +227,38 @@ func GetExportNames(exportTarget ExportTarget, ctx RunContext) (bpName string, r
 	return
 }
 
+// GetExportName returns the export pack name for a single pack. Resolution
+// order: per-pack override map (bpNames/rpNames), then the singular
+// bpName/rpName for the primary pack, then the default
+// "<projectName>_bp<index>" / "<projectName>_rp<index>".
+func GetExportName(
+	exportTarget ExportTarget, ctx RunContext, pack Pack, packType string,
+) (string, error) {
+	namesMap := exportTarget.BpNames
+	singleName := exportTarget.BpName
+	primaryName := "BP"
+	if packType == "rp" {
+		namesMap = exportTarget.RpNames
+		singleName = exportTarget.RpName
+		primaryName = "RP"
+	}
+	if expr, ok := namesMap[pack.Name]; ok && expr != "" {
+		name, err := EvalString(expr, ctx)
+		if err != nil {
+			return "", burrito.WrapError(err, "Failed to evaluate pack name.")
+		}
+		return name, nil
+	}
+	if pack.Name == primaryName && singleName != "" {
+		name, err := EvalString(singleName, ctx)
+		if err != nil {
+			return "", burrito.WrapError(err, "Failed to evaluate pack name.")
+		}
+		return name, nil
+	}
+	return ctx.Config.Name + "_" + strings.ToLower(packType) + packSuffix(pack.Name), nil
+}
+
 type resolvedExportTarget struct {
 	target ExportTarget
 	bpPath string
