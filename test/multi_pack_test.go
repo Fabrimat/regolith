@@ -494,3 +494,81 @@ func TestMultiPackProjectLocalBuild(t *testing.T) {
 		filepath.Join(tmpDir, "packs", "RP"),
 		filepath.Join(tmpDir, "build", "multi_pack_project_rp"), t)
 }
+
+func TestMultiPackExactExport(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(multiPackProjectPath, workingDir, t)
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "multi_pack_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP1" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"dataPath": "./packs/data",
+			"profiles": {
+				"exact": {
+					"filters": [],
+					"export": {
+						"target": "exact",
+						"bpPath": "../out/BP",
+						"rpPath": "../out/RP",
+						"bpPaths": { "BP1": "../out/BP1" }
+					}
+				}
+			}
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(workingDir)
+	if err := regolith.Run("exact", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("exact run failed:", err)
+	}
+	comparePaths(filepath.Join(workingDir, "packs", "BP"), filepath.Join(tmpDir, "out", "BP"), t)
+	comparePaths(filepath.Join(workingDir, "packs", "BP1"), filepath.Join(tmpDir, "out", "BP1"), t)
+	comparePaths(filepath.Join(workingDir, "packs", "RP"), filepath.Join(tmpDir, "out", "RP"), t)
+}
+
+func TestMultiPackExactExportMissingPathFails(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(multiPackProjectPath, workingDir, t)
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "multi_pack_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP1" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"dataPath": "./packs/data",
+			"profiles": {
+				"exact": {
+					"filters": [],
+					"export": { "target": "exact", "bpPath": "../out/BP", "rpPath": "../out/RP" }
+				}
+			}
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(workingDir)
+	if err := regolith.Run("exact", []string{}, true, "", false, false, false); err == nil {
+		t.Fatal("expected error: BP1 has no exact path")
+	}
+}
