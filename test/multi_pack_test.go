@@ -2,7 +2,11 @@ package test
 
 import (
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Bedrock-OSS/regolith/regolith"
 )
@@ -171,5 +175,41 @@ func TestPacksMarshal_MultiProducesMaps(t *testing.T) {
 	if len(roundTrip.BehaviorPacks) != 2 ||
 		roundTrip.BehaviorPacks[1].Name != "BP1" {
 		t.Fatalf("round trip lost packs: %+v", roundTrip.BehaviorPacks)
+	}
+}
+
+func TestSetupTmpFilesCreatesAllPackFolders(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(minimalProjectPath, workingDir, t)
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "regolith_test_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"profiles": {
+				"dev": { "filters": [], "export": { "target": "local" } }
+			},
+			"dataPath": "./packs/data"
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(workingDir)
+	if err := regolith.Run("dev", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("run failed:", err)
+	}
+	for _, packName := range []string{"BP", "BP1", "RP", "data"} {
+		assertDirExistsOrFatal(
+			filepath.Join(workingDir, ".regolith", "tmp", packName), t)
 	}
 }
