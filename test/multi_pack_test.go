@@ -21,7 +21,7 @@ func mustUnmarshalObject(t *testing.T, data []byte) map[string]any {
 	return obj
 }
 
-func TestPackSortingAndPrimaryAccessors(t *testing.T) {
+func TestPackSortingAndIsZero(t *testing.T) {
 	packs := regolith.Packs{
 		BehaviorPacks: []regolith.Pack{
 			{Name: "BP2", Source: "b2"},
@@ -37,12 +37,6 @@ func TestPackSortingAndPrimaryAccessors(t *testing.T) {
 		packs.BehaviorPacks[1].Name != "BP1" ||
 		packs.BehaviorPacks[2].Name != "BP2" {
 		t.Fatalf("packs not sorted by index: %+v", packs.BehaviorPacks)
-	}
-	if packs.PrimaryBehaviorSource() != "b0" {
-		t.Fatalf("expected primary bp source b0, got %q", packs.PrimaryBehaviorSource())
-	}
-	if packs.PrimaryResourceSource() != "r0" {
-		t.Fatalf("expected primary rp source r0, got %q", packs.PrimaryResourceSource())
 	}
 	if packs.IsZero() {
 		t.Fatal("non-empty packs reported IsZero")
@@ -623,5 +617,54 @@ func TestMultiPackExactExportMissingPathFails(t *testing.T) {
 	os.Chdir(workingDir)
 	if err := regolith.Run("exact", []string{}, true, "", false, false, false); err == nil {
 		t.Fatal("expected error: BP1 has no exact path")
+	}
+}
+
+func TestMultiPackWorldExport(t *testing.T) {
+	defer os.Chdir(getWdOrFatal(t))
+	tmpDir := prepareTestDirectory(
+		fmt.Sprintf("%s-%d", t.Name(), time.Now().UnixNano()), t)
+	workingDir := filepath.Join(tmpDir, "working-dir")
+	copyFilesOrFatal(minimalProjectPath, workingDir, t)
+
+	// worldPath is relative to workingDir; resolves to tmpDir/myworld.
+	worldDir := filepath.Join(tmpDir, "myworld")
+
+	config := []byte(`{
+		"$schema": "x",
+		"name": "regolith_test_project",
+		"author": "Bedrock-OSS",
+		"packs": {
+			"behaviorPacks": { "BP": "./packs/BP", "BP1": "./packs/BP" },
+			"resourcePacks": { "RP": "./packs/RP" }
+		},
+		"regolith": {
+			"formatVersion": "1.9.0",
+			"profiles": {
+				"world": {
+					"filters": [],
+					"export": { "target": "world", "worldPath": "../myworld" }
+				}
+			},
+			"dataPath": "./packs/data"
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(workingDir, "config.json"), config, 0644); err != nil {
+		t.Fatal(err)
+	}
+	os.Chdir(workingDir)
+	if err := regolith.Run("world", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("first world run failed:", err)
+	}
+
+	srcBp := filepath.Join(workingDir, "packs", "BP")
+	srcRp := filepath.Join(workingDir, "packs", "RP")
+	comparePaths(srcBp, filepath.Join(worldDir, "behavior_packs", "regolith_test_project_bp"), t)
+	comparePaths(srcBp, filepath.Join(worldDir, "behavior_packs", "regolith_test_project_bp1"), t)
+	comparePaths(srcRp, filepath.Join(worldDir, "resource_packs", "regolith_test_project_rp"), t)
+
+	// Second run must pass file-protection safety checks.
+	if err := regolith.Run("world", []string{}, true, "", false, false, false); err != nil {
+		t.Fatal("second world run failed:", err)
 	}
 }

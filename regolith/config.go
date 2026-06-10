@@ -97,25 +97,6 @@ func (p Packs) IsZero() bool {
 	return len(p.BehaviorPacks) == 0 && len(p.ResourcePacks) == 0
 }
 
-// PrimaryBehaviorSource returns the source path of the "BP" pack, or "".
-func (p Packs) PrimaryBehaviorSource() string {
-	return primaryPackSource(p.BehaviorPacks, "BP")
-}
-
-// PrimaryResourceSource returns the source path of the "RP" pack, or "".
-func (p Packs) PrimaryResourceSource() string {
-	return primaryPackSource(p.ResourcePacks, "RP")
-}
-
-func primaryPackSource(packs []Pack, primaryName string) string {
-	for _, pack := range packs {
-		if pack.Name == primaryName {
-			return pack.Source
-		}
-	}
-	return ""
-}
-
 // packSuffix returns the numeric suffix of a pack name ("" for "BP", "1" for
 // "BP1", "12" for "BP12").
 func packSuffix(name string) string {
